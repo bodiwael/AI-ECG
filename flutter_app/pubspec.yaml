@@ -1,0 +1,35 @@
+name: ai_ecg_monitor
+description: AI-ECG Heart Monitor - Real-time ECG visualization with heart attack prediction
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  flutter_blue_plus: ^1.31.0
+  provider: ^6.1.1
+  fl_chart: ^0.66.0
+  permission_handler: ^11.1.0
+  google_fonts: ^6.1.0
+  animated_text_kit: ^4.2.2
+  lottie: ^2.7.0
+  shimmer: ^3.0.0
+  flutter_animate: ^4.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/animations/
+    - assets/images/
