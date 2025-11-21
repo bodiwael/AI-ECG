@@ -1,21 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 enum BleConnectionState { disconnected, scanning, connecting, connected }
 
 class BluetoothProvider extends ChangeNotifier {
-  // BLE UUIDs (must match ESP32 firmware)
-  static const String serviceUUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-  static const String ecgCharUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-  static const String paramsCharUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a9";
-  static const String alertCharUUID = "beb5483e-36e1-4688-b7f5-ea07361b26aa";
-
   BleConnectionState _connectionState = BleConnectionState.disconnected;
   BluetoothDevice? _connectedDevice;
-  List<ScanResult> _scanResults = [];
+  BluetoothConnection? _connection;
+  List<BluetoothDevice> _pairedDevices = [];
   String _statusMessage = "Ready to connect";
 
   // ECG Data
@@ -29,15 +25,13 @@ class BluetoothProvider extends ChangeNotifier {
   bool _leadsOff = true;
   String _alertMessage = "";
 
-  // Data streams
-  StreamSubscription<List<int>>? _ecgSubscription;
-  StreamSubscription<List<int>>? _paramsSubscription;
-  StreamSubscription<List<int>>? _alertSubscription;
+  // Data buffer for parsing
+  String _dataBuffer = "";
 
   // Getters
   BleConnectionState get connectionState => _connectionState;
   BluetoothDevice? get connectedDevice => _connectedDevice;
-  List<ScanResult> get scanResults => _scanResults;
+  List<BluetoothDevice> get pairedDevices => _pairedDevices;
   String get statusMessage => _statusMessage;
   int get ecgValue => _ecgValue;
   int get avgBPM => _avgBPM;
@@ -68,7 +62,7 @@ class BluetoothProvider extends ChangeNotifier {
         status == PermissionStatus.limited);
   }
 
-  Future<void> startScan() async {
+  Future<void> getPairedDevices() async {
     if (_connectionState == BleConnectionState.scanning) return;
 
     bool permissionsGranted = await requestPermissions();
@@ -78,109 +72,65 @@ class BluetoothProvider extends ChangeNotifier {
       return;
     }
 
-    // Check if Bluetooth is on
-    if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
-      _statusMessage = "Please turn on Bluetooth";
-      notifyListeners();
-      return;
-    }
-
     _connectionState = BleConnectionState.scanning;
-    _statusMessage = "Scanning for devices...";
-    _scanResults = [];
+    _statusMessage = "Getting paired devices...";
     notifyListeners();
 
-    // Listen to scan results
-    FlutterBluePlus.scanResults.listen((results) {
-      // Show ALL devices with names (for debugging, user can identify their device)
-      _scanResults = results
-          .where((r) => r.device.platformName.isNotEmpty)
-          .toList();
+    try {
+      // Get list of paired devices
+      _pairedDevices = await FlutterBluetoothSerial.instance.getBondedDevices();
 
-      // Debug: print found devices
-      for (var result in _scanResults) {
-        debugPrint("Found device: ${result.device.platformName} - ${result.device.remoteId}");
+      debugPrint("Found ${_pairedDevices.length} paired devices");
+      for (var device in _pairedDevices) {
+        debugPrint("Device: ${device.name} - ${device.address}");
       }
 
-      notifyListeners();
-    });
-
-    // Start scanning
-    await FlutterBluePlus.startScan(
-      timeout: const Duration(seconds: 15),
-      androidScanMode: AndroidScanMode.lowLatency,
-    );
-
-    // After scan completes
-    await Future.delayed(const Duration(seconds: 15));
-    await stopScan();
-  }
-
-  Future<void> stopScan() async {
-    await FlutterBluePlus.stopScan();
-    if (_connectionState == BleConnectionState.scanning) {
       _connectionState = BleConnectionState.disconnected;
-      _statusMessage = _scanResults.isEmpty
-          ? "No devices found. Make sure AI-ECG Monitor is powered on."
+      _statusMessage = _pairedDevices.isEmpty
+          ? "No paired devices. Pair 'AI-ECG Monitor' in Bluetooth settings first."
           : "Select a device to connect";
+      notifyListeners();
+    } catch (e) {
+      _statusMessage = "Error getting devices: ${e.toString()}";
+      _connectionState = BleConnectionState.disconnected;
       notifyListeners();
     }
   }
 
-  Future<void> connectToDevice(BluetoothDevice device) async {
+  // Alias for compatibility with existing UI
+  Future<void> startScan() async {
+    await getPairedDevices();
+  }
+
+  // Return paired devices as scan results for UI compatibility
+  List<BluetoothDevice> get scanResults => _pairedDevices;
+
+  Future<void> connectToBluetoothDevice(BluetoothDevice device) async {
     try {
       _connectionState = BleConnectionState.connecting;
-      _statusMessage = "Connecting to ${device.platformName}...";
+      _statusMessage = "Connecting to ${device.name}...";
       notifyListeners();
 
-      await device.connect(timeout: const Duration(seconds: 10));
+      // Connect to the device
+      _connection = await BluetoothConnection.toAddress(device.address);
       _connectedDevice = device;
 
-      // Discover services
-      List<BluetoothService> services = await device.discoverServices();
-
-      // Find our service
-      BluetoothService? ecgService;
-      for (var service in services) {
-        if (service.uuid.toString().toLowerCase() == serviceUUID) {
-          ecgService = service;
-          break;
-        }
-      }
-
-      if (ecgService == null) {
-        throw Exception("ECG service not found on device");
-      }
-
-      // Subscribe to characteristics
-      for (var characteristic in ecgService.characteristics) {
-        String charUuid = characteristic.uuid.toString().toLowerCase();
-
-        if (charUuid == ecgCharUUID) {
-          await characteristic.setNotifyValue(true);
-          _ecgSubscription = characteristic.lastValueStream.listen(_onEcgData);
-        } else if (charUuid == paramsCharUUID) {
-          await characteristic.setNotifyValue(true);
-          _paramsSubscription =
-              characteristic.lastValueStream.listen(_onParamsData);
-        } else if (charUuid == alertCharUUID) {
-          await characteristic.setNotifyValue(true);
-          _alertSubscription =
-              characteristic.lastValueStream.listen(_onAlertData);
-        }
-      }
-
       _connectionState = BleConnectionState.connected;
-      _statusMessage = "Connected to ${device.platformName}";
-
-      // Listen for disconnection
-      device.connectionState.listen((state) {
-        if (state == BluetoothConnectionState.disconnected) {
-          _handleDisconnection();
-        }
-      });
-
+      _statusMessage = "Connected to ${device.name}";
       notifyListeners();
+
+      // Send start command
+      _sendCommand("START");
+
+      // Listen for incoming data
+      _connection!.input!.listen(
+        _onDataReceived,
+        onDone: _handleDisconnection,
+        onError: (error) {
+          debugPrint("Bluetooth error: $error");
+          _handleDisconnection();
+        },
+      );
     } catch (e) {
       _statusMessage = "Connection failed: ${e.toString()}";
       _connectionState = BleConnectionState.disconnected;
@@ -188,48 +138,59 @@ class BluetoothProvider extends ChangeNotifier {
     }
   }
 
-  void _onEcgData(List<int> data) {
-    if (data.length >= 2) {
-      _ecgValue = (data[0] << 8) | data[1];
-      _ecgStreamController.add(_ecgValue);
-      notifyListeners();
+  void _sendCommand(String command) {
+    if (_connection != null && _connection!.isConnected) {
+      _connection!.output.add(Uint8List.fromList(utf8.encode("$command\n")));
     }
   }
 
-  void _onParamsData(List<int> data) {
-    try {
-      String paramsString = utf8.decode(data);
-      List<String> params = paramsString.split(',');
+  void _onDataReceived(Uint8List data) {
+    // Decode incoming data
+    String incoming = utf8.decode(data, allowMalformed: true);
+    _dataBuffer += incoming;
 
-      if (params.length >= 7) {
-        _avgBPM = int.tryParse(params[0]) ?? 0;
-        _currentBPM = int.tryParse(params[1]) ?? 0;
-        _hrv = double.tryParse(params[2]) ?? 0;
-        _stLevel = int.tryParse(params[3]) ?? 0;
-        _riskScore = int.tryParse(params[4]) ?? 0;
-        _riskLevel = params[5];
-        _leadsOff = params[6] == '1';
+    // Process complete lines
+    while (_dataBuffer.contains('\n')) {
+      int newlineIndex = _dataBuffer.indexOf('\n');
+      String line = _dataBuffer.substring(0, newlineIndex).trim();
+      _dataBuffer = _dataBuffer.substring(newlineIndex + 1);
+
+      _parseLine(line);
+    }
+  }
+
+  void _parseLine(String line) {
+    if (line.startsWith("DATA:")) {
+      // Parse ECG data line: DATA:ecg,avgBPM,currentBPM,hrv,stLevel,riskScore,riskLevel,leadsOff
+      String dataStr = line.substring(5);
+      List<String> parts = dataStr.split(',');
+
+      if (parts.length >= 8) {
+        _ecgValue = int.tryParse(parts[0]) ?? 0;
+        _avgBPM = int.tryParse(parts[1]) ?? 0;
+        _currentBPM = int.tryParse(parts[2]) ?? 0;
+        _hrv = double.tryParse(parts[3]) ?? 0;
+        _stLevel = int.tryParse(parts[4]) ?? 0;
+        _riskScore = int.tryParse(parts[5]) ?? 0;
+        _riskLevel = parts[6];
+        _leadsOff = parts[7] == '1';
+
+        // Emit ECG value to stream
+        _ecgStreamController.add(_ecgValue);
 
         notifyListeners();
       }
-    } catch (e) {
-      debugPrint("Error parsing params: $e");
-    }
-  }
-
-  void _onAlertData(List<int> data) {
-    try {
-      _alertMessage = utf8.decode(data);
+    } else if (line.startsWith("ALERT:")) {
+      _alertMessage = line.substring(6);
       notifyListeners();
-    } catch (e) {
-      debugPrint("Error parsing alert: $e");
+    } else if (line == "PONG") {
+      debugPrint("Device responded to ping");
     }
   }
 
   void _handleDisconnection() {
-    _ecgSubscription?.cancel();
-    _paramsSubscription?.cancel();
-    _alertSubscription?.cancel();
+    _connection?.dispose();
+    _connection = null;
 
     _connectionState = BleConnectionState.disconnected;
     _connectedDevice = null;
@@ -242,22 +203,21 @@ class BluetoothProvider extends ChangeNotifier {
     _riskScore = 0;
     _riskLevel = "UNKNOWN";
     _leadsOff = true;
+    _dataBuffer = "";
 
     notifyListeners();
   }
 
   Future<void> disconnect() async {
-    if (_connectedDevice != null) {
-      await _connectedDevice!.disconnect();
-    }
+    _sendCommand("STOP");
+    await Future.delayed(const Duration(milliseconds: 100));
+    _connection?.dispose();
     _handleDisconnection();
   }
 
   @override
   void dispose() {
-    _ecgSubscription?.cancel();
-    _paramsSubscription?.cancel();
-    _alertSubscription?.cancel();
+    _connection?.dispose();
     _ecgStreamController.close();
     super.dispose();
   }

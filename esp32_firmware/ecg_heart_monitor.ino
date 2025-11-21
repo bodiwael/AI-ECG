@@ -1,6 +1,7 @@
 /*
  * AI-ECG Heart Monitor with Heart Attack Prediction
  * ESP32 + AD8232 ECG Sensor
+ * Using Classic Bluetooth Serial (SPP)
  *
  * Features:
  * - Real-time ECG signal acquisition
@@ -8,16 +9,20 @@
  * - HRV (Heart Rate Variability) analysis
  * - Arrhythmia detection
  * - Heart attack risk prediction
- * - Bluetooth Low Energy (BLE) data transmission
+ * - Classic Bluetooth Serial data transmission
  *
  * Author: AI-ECG Project Team
  * License: MIT
  */
 
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
+#include "BluetoothSerial.h"
+
+// Check if Bluetooth is enabled
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error Bluetooth is not enabled! Please run `make menuconfig` and enable it
+#endif
+
+BluetoothSerial SerialBT;
 
 // ==================== PIN DEFINITIONS ====================
 #define ECG_OUTPUT_PIN 34      // Analog input for ECG signal (ADC1_CH6)
@@ -25,16 +30,10 @@
 #define LO_MINUS_PIN 33        // Leads-off detection negative
 #define LED_PIN 2              // Built-in LED for status indication
 
-// ==================== BLE CONFIGURATION ====================
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define ECG_CHAR_UUID       "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-#define PARAMS_CHAR_UUID    "beb5483e-36e1-4688-b7f5-ea07361b26a9"
-#define ALERT_CHAR_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26aa"
-
 // ==================== SAMPLING CONFIGURATION ====================
-#define SAMPLE_RATE 500        // Hz
-#define SAMPLE_INTERVAL_US (1000000 / SAMPLE_RATE)
-#define BUFFER_SIZE 500        // 1 second of data
+#define SAMPLE_RATE 100        // Hz (reduced for Bluetooth Serial stability)
+#define SAMPLE_INTERVAL_MS (1000 / SAMPLE_RATE)
+#define BUFFER_SIZE 100        // 1 second of data
 #define RR_BUFFER_SIZE 20      // For HRV calculation
 
 // ==================== DETECTION THRESHOLDS ====================
@@ -54,7 +53,7 @@ int ecgValue = 0;
 
 // Timing
 unsigned long lastSampleTime = 0;
-unsigned long lastBLEUpdate = 0;
+unsigned long lastDataSend = 0;
 unsigned long lastRPeakTime = 0;
 
 // Heart Rate Analysis
@@ -79,26 +78,8 @@ int heartAttackRisk = 0;  // 0-100 scale
 String riskLevel = "NORMAL";
 String alertMessage = "";
 
-// BLE
-BLEServer* pServer = NULL;
-BLECharacteristic* pEcgCharacteristic = NULL;
-BLECharacteristic* pParamsCharacteristic = NULL;
-BLECharacteristic* pAlertCharacteristic = NULL;
-bool deviceConnected = false;
-bool oldDeviceConnected = false;
-
-// ==================== BLE CALLBACKS ====================
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      Serial.println("BLE Device Connected");
-    };
-
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-      Serial.println("BLE Device Disconnected");
-    }
-};
+// Bluetooth connection status
+bool btConnected = false;
 
 // ==================== SETUP ====================
 void setup() {
@@ -117,65 +98,32 @@ void setup() {
   memset(ecgBuffer, 0, sizeof(ecgBuffer));
   memset(rrIntervals, 0, sizeof(rrIntervals));
 
-  // Initialize BLE
-  initBLE();
+  // Initialize Bluetooth Serial
+  SerialBT.begin("AI-ECG Monitor");  // Bluetooth device name
 
   Serial.println("=========================================");
   Serial.println("  AI-ECG Heart Monitor Started");
-  Serial.println("  With Heart Attack Prediction");
+  Serial.println("  Classic Bluetooth Serial Mode");
   Serial.println("=========================================");
+  Serial.println("Device name: AI-ECG Monitor");
+  Serial.println("Pair with your phone and connect!");
   Serial.println("Place electrodes on body");
-  Serial.println("Waiting for BLE connection...");
-}
-
-// ==================== BLE INITIALIZATION ====================
-void initBLE() {
-  BLEDevice::init("AI-ECG Monitor");
-
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
-
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-
-  // ECG Signal Characteristic
-  pEcgCharacteristic = pService->createCharacteristic(
-    ECG_CHAR_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pEcgCharacteristic->addDescriptor(new BLE2902());
-
-  // Parameters Characteristic (BPM, HRV, ST, Risk)
-  pParamsCharacteristic = pService->createCharacteristic(
-    PARAMS_CHAR_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pParamsCharacteristic->addDescriptor(new BLE2902());
-
-  // Alert Characteristic
-  pAlertCharacteristic = pService->createCharacteristic(
-    ALERT_CHAR_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pAlertCharacteristic->addDescriptor(new BLE2902());
-
-  pService->start();
-
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);
-  BLEDevice::startAdvertising();
 }
 
 // ==================== MAIN LOOP ====================
 void loop() {
-  unsigned long currentTime = micros();
+  unsigned long currentTime = millis();
+
+  // Check Bluetooth connection
+  btConnected = SerialBT.hasClient();
+
+  // Blink LED when waiting for connection
+  if (!btConnected) {
+    digitalWrite(LED_PIN, (currentTime / 500) % 2);
+  }
 
   // Sample at defined rate
-  if (currentTime - lastSampleTime >= SAMPLE_INTERVAL_US) {
+  if (currentTime - lastSampleTime >= SAMPLE_INTERVAL_MS) {
     lastSampleTime = currentTime;
 
     // Check leads connection
@@ -193,40 +141,79 @@ void loop() {
       detectRPeak(ecgValue);
       analyzeSTSegment();
 
-      // Update LED based on heartbeat
-      digitalWrite(LED_PIN, rPeakDetected ? HIGH : LOW);
-
-      // Serial output for plotter
-      Serial.println(ecgValue);
-    } else {
-      Serial.println("LEADS_OFF");
+      // Update LED based on heartbeat (when connected)
+      if (btConnected) {
+        digitalWrite(LED_PIN, rPeakDetected ? HIGH : LOW);
+      }
     }
   }
 
-  // Update BLE every 50ms
-  if (millis() - lastBLEUpdate >= 50) {
-    lastBLEUpdate = millis();
+  // Send data every 100ms (10 Hz) for smooth display
+  if (currentTime - lastDataSend >= 100) {
+    lastDataSend = currentTime;
 
     // Calculate heart parameters
     calculateHeartRate();
     calculateHRV();
     assessHeartAttackRisk();
 
-    // Send data via BLE
-    if (deviceConnected) {
-      sendBLEData();
+    // Send data via Bluetooth Serial
+    if (btConnected) {
+      sendBluetoothData();
     }
+
+    // Also print to Serial for debugging
+    Serial.print("ECG:");
+    Serial.print(ecgValue);
+    Serial.print(" BPM:");
+    Serial.print(avgBPM);
+    Serial.print(" Risk:");
+    Serial.println(riskLevel);
   }
 
-  // Handle BLE reconnection
-  if (!deviceConnected && oldDeviceConnected) {
-    delay(500);
-    pServer->startAdvertising();
-    Serial.println("Advertising restarted");
-    oldDeviceConnected = deviceConnected;
+  // Handle incoming commands from app
+  if (SerialBT.available()) {
+    String command = SerialBT.readStringUntil('\n');
+    handleCommand(command);
   }
-  if (deviceConnected && !oldDeviceConnected) {
-    oldDeviceConnected = deviceConnected;
+}
+
+// ==================== HANDLE COMMANDS FROM APP ====================
+void handleCommand(String command) {
+  command.trim();
+
+  if (command == "PING") {
+    SerialBT.println("PONG");
+  } else if (command == "STATUS") {
+    SerialBT.println("OK:AI-ECG Monitor Ready");
+  } else if (command == "START") {
+    SerialBT.println("OK:Streaming started");
+  } else if (command == "STOP") {
+    SerialBT.println("OK:Streaming stopped");
+  }
+}
+
+// ==================== SEND DATA VIA BLUETOOTH ====================
+void sendBluetoothData() {
+  // Send data as simple CSV format:
+  // ECG,avgBPM,currentBPM,HRV,stLevel,riskScore,riskLevel,leadsOff
+  // Example: 2048,72,75,45.2,12,15,NORMAL,0
+
+  String data = "DATA:";
+  data += String(ecgValue) + ",";
+  data += String(avgBPM) + ",";
+  data += String(currentBPM) + ",";
+  data += String(hrv, 1) + ",";
+  data += String(stLevel) + ",";
+  data += String(heartAttackRisk) + ",";
+  data += riskLevel + ",";
+  data += String(leadsOff ? 1 : 0);
+
+  SerialBT.println(data);
+
+  // Send alert if risk is elevated
+  if (heartAttackRisk >= 30) {
+    SerialBT.println("ALERT:" + alertMessage);
   }
 }
 
@@ -330,7 +317,6 @@ void calculateHRV() {
 // ==================== ST SEGMENT ANALYSIS ====================
 void analyzeSTSegment() {
   // Simplified ST segment analysis
-  // In real implementation, this should be more sophisticated
 
   // Get baseline (average of buffer)
   long sum = 0;
@@ -354,10 +340,10 @@ void assessHeartAttackRisk() {
   // Factor 1: ST Segment Abnormalities (40% weight)
   if (stLevel > ST_ELEVATION_THRESHOLD) {
     heartAttackRisk += 40;
-    alertMessage += "ST Elevation detected! ";
+    alertMessage += "ST Elevation! ";
   } else if (stLevel < ST_DEPRESSION_THRESHOLD) {
     heartAttackRisk += 30;
-    alertMessage += "ST Depression detected! ";
+    alertMessage += "ST Depression! ";
   }
 
   // Factor 2: Abnormal Heart Rate (25% weight)
@@ -370,7 +356,6 @@ void assessHeartAttackRisk() {
   }
 
   // Factor 3: Low HRV (20% weight)
-  // Low HRV is associated with increased cardiac risk
   if (hrv > 0 && hrv < 20) {
     heartAttackRisk += 20;
     alertMessage += "Low HRV! ";
@@ -427,31 +412,4 @@ void detectArrhythmia() {
 
   // If more than 30% of intervals are irregular
   arrhythmiaDetected = (irregularCount > RR_BUFFER_SIZE * 0.3);
-}
-
-// ==================== BLE DATA TRANSMISSION ====================
-void sendBLEData() {
-  // Send ECG value (2 bytes)
-  uint8_t ecgData[2];
-  ecgData[0] = (ecgValue >> 8) & 0xFF;
-  ecgData[1] = ecgValue & 0xFF;
-  pEcgCharacteristic->setValue(ecgData, 2);
-  pEcgCharacteristic->notify();
-
-  // Send parameters as JSON-like string
-  String params = String(avgBPM) + "," +
-                  String(currentBPM) + "," +
-                  String(hrv, 1) + "," +
-                  String(stLevel) + "," +
-                  String(heartAttackRisk) + "," +
-                  riskLevel + "," +
-                  String(leadsOff ? 1 : 0);
-  pParamsCharacteristic->setValue(params.c_str());
-  pParamsCharacteristic->notify();
-
-  // Send alert if risk is elevated
-  if (heartAttackRisk >= 30) {
-    pAlertCharacteristic->setValue(alertMessage.c_str());
-    pAlertCharacteristic->notify();
-  }
 }

@@ -442,11 +442,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => DeviceListDialog(
-        scanResults: btProvider.scanResults,
+        devices: btProvider.pairedDevices,
         isScanning: btProvider.connectionState == BleConnectionState.scanning,
         onDeviceSelected: (device) {
           Navigator.pop(context);
-          btProvider.connectToDevice(device);
+          btProvider.connectToBluetoothDevice(device);
         },
         onRefresh: () => btProvider.startScan(),
       ),
@@ -460,7 +460,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         backgroundColor: const Color(0xFF1A1A2E),
         title: const Text('Disconnect?'),
         content: Text(
-            'Disconnect from ${btProvider.connectedDevice?.platformName ?? "device"}?'),
+            'Disconnect from ${btProvider.connectedDevice?.name ?? "device"}?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),

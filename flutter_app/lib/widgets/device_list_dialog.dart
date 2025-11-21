@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
 class DeviceListDialog extends StatelessWidget {
-  final List<ScanResult> scanResults;
+  final List<BluetoothDevice> devices;
   final bool isScanning;
   final Function(BluetoothDevice) onDeviceSelected;
   final VoidCallback onRefresh;
 
   const DeviceListDialog({
     super.key,
-    required this.scanResults,
+    required this.devices,
     required this.isScanning,
     required this.onDeviceSelected,
     required this.onRefresh,
@@ -37,10 +37,10 @@ class DeviceListDialog extends StatelessWidget {
           // Title
           Row(
             children: [
-              const Icon(Icons.bluetooth_searching, color: Color(0xFF00BCD4)),
+              const Icon(Icons.bluetooth, color: Color(0xFF00BCD4)),
               const SizedBox(width: 12),
               Text(
-                'Available Devices',
+                'Paired Devices',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -57,24 +57,24 @@ class DeviceListDialog extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // Scanning indicator
+          // Loading indicator
           if (isScanning)
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  SizedBox(
+                  const SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: const Color(0xFF00BCD4),
+                      color: Color(0xFF00BCD4),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    'Scanning for AI-ECG devices...',
+                    'Getting paired devices...',
                     style: TextStyle(color: Colors.grey[400]),
                   ),
                 ],
@@ -83,14 +83,14 @@ class DeviceListDialog extends StatelessWidget {
 
           // Device List
           Flexible(
-            child: scanResults.isEmpty
+            child: devices.isEmpty
                 ? _buildEmptyState()
                 : ListView.builder(
                     shrinkWrap: true,
-                    itemCount: scanResults.length,
+                    itemCount: devices.length,
                     itemBuilder: (context, index) {
-                      final result = scanResults[index];
-                      return _buildDeviceItem(context, result, index);
+                      final device = devices[index];
+                      return _buildDeviceItem(context, device, index);
                     },
                   ),
           ),
@@ -110,7 +110,7 @@ class DeviceListDialog extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Make sure your AI-ECG Monitor is powered on and in pairing mode',
+                    'Pair "AI-ECG Monitor" in your phone\'s Bluetooth settings first, then select it here.',
                     style: TextStyle(
                       color: Colors.grey[400],
                       fontSize: 12,
@@ -139,7 +139,7 @@ class DeviceListDialog extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              isScanning ? 'Searching...' : 'No devices found',
+              isScanning ? 'Loading...' : 'No paired devices',
               style: TextStyle(
                 color: Colors.grey[500],
                 fontSize: 16,
@@ -147,7 +147,7 @@ class DeviceListDialog extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Tap refresh to scan again',
+              'Go to Bluetooth settings to pair your device',
               style: TextStyle(
                 color: Colors.grey[600],
                 fontSize: 12,
@@ -159,23 +159,10 @@ class DeviceListDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildDeviceItem(BuildContext context, ScanResult result, int index) {
-    final device = result.device;
-    final rssi = result.rssi;
-
-    // Signal strength indicator
-    IconData signalIcon;
-    Color signalColor;
-    if (rssi >= -50) {
-      signalIcon = Icons.signal_cellular_4_bar;
-      signalColor = const Color(0xFF00E676);
-    } else if (rssi >= -70) {
-      signalIcon = Icons.signal_cellular_alt;
-      signalColor = const Color(0xFFFFC107);
-    } else {
-      signalIcon = Icons.signal_cellular_alt_1_bar;
-      signalColor = const Color(0xFFFF5252);
-    }
+  Widget _buildDeviceItem(BuildContext context, BluetoothDevice device, int index) {
+    // Check if it's likely our ECG device
+    bool isEcgDevice = device.name?.contains('ECG') == true ||
+        device.name?.contains('AI-ECG') == true;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -189,12 +176,16 @@ class DeviceListDialog extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF00BCD4).withOpacity(0.2),
+                  color: isEcgDevice
+                      ? const Color(0xFF00E676).withOpacity(0.2)
+                      : const Color(0xFF00BCD4).withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
-                  Icons.monitor_heart,
-                  color: Color(0xFF00BCD4),
+                child: Icon(
+                  isEcgDevice ? Icons.monitor_heart : Icons.bluetooth,
+                  color: isEcgDevice
+                      ? const Color(0xFF00E676)
+                      : const Color(0xFF00BCD4),
                 ),
               ),
               const SizedBox(width: 16),
@@ -203,17 +194,16 @@ class DeviceListDialog extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      device.platformName.isNotEmpty
-                          ? device.platformName
-                          : 'Unknown Device',
-                      style: const TextStyle(
+                      device.name ?? 'Unknown Device',
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
+                        color: isEcgDevice ? const Color(0xFF00E676) : null,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      device.remoteId.toString(),
+                      device.address,
                       style: TextStyle(
                         color: Colors.grey[500],
                         fontSize: 12,
@@ -222,19 +212,22 @@ class DeviceListDialog extends StatelessWidget {
                   ],
                 ),
               ),
-              Column(
-                children: [
-                  Icon(signalIcon, color: signalColor, size: 20),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$rssi dBm',
+              if (isEcgDevice)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00E676).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'ECG',
                     style: TextStyle(
-                      color: Colors.grey[500],
+                      color: Color(0xFF00E676),
                       fontSize: 10,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                ],
-              ),
+                ),
             ],
           ),
         ),
