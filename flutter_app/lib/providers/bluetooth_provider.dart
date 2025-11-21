@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-enum BleBleConnectionState { disconnected, scanning, connecting, connected }
+enum BleConnectionState { disconnected, scanning, connecting, connected }
 
 class BluetoothProvider extends ChangeNotifier {
   // BLE UUIDs (must match ESP32 firmware)
@@ -182,7 +182,7 @@ class BluetoothProvider extends ChangeNotifier {
 
       // Listen for disconnection
       device.connectionState.listen((state) {
-        if (state == BluetoothBleConnectionState.disconnected) {
+        if (state == BluetoothConnectionState.disconnected) {
           _handleDisconnection();
         }
       });
