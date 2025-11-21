@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-enum ConnectionState { disconnected, scanning, connecting, connected }
+enum BleBleConnectionState { disconnected, scanning, connecting, connected }
 
 class BluetoothProvider extends ChangeNotifier {
   // BLE UUIDs (must match ESP32 firmware)
@@ -13,7 +13,7 @@ class BluetoothProvider extends ChangeNotifier {
   static const String paramsCharUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a9";
   static const String alertCharUUID = "beb5483e-36e1-4688-b7f5-ea07361b26aa";
 
-  ConnectionState _connectionState = ConnectionState.disconnected;
+  BleConnectionState _connectionState = BleConnectionState.disconnected;
   BluetoothDevice? _connectedDevice;
   List<ScanResult> _scanResults = [];
   String _statusMessage = "Ready to connect";
@@ -35,7 +35,7 @@ class BluetoothProvider extends ChangeNotifier {
   StreamSubscription<List<int>>? _alertSubscription;
 
   // Getters
-  ConnectionState get connectionState => _connectionState;
+  BleConnectionState get connectionState => _connectionState;
   BluetoothDevice? get connectedDevice => _connectedDevice;
   List<ScanResult> get scanResults => _scanResults;
   String get statusMessage => _statusMessage;
@@ -48,7 +48,7 @@ class BluetoothProvider extends ChangeNotifier {
   String get riskLevel => _riskLevel;
   bool get leadsOff => _leadsOff;
   String get alertMessage => _alertMessage;
-  bool get isConnected => _connectionState == ConnectionState.connected;
+  bool get isConnected => _connectionState == BleConnectionState.connected;
 
   // ECG value stream for chart
   final StreamController<int> _ecgStreamController =
@@ -69,7 +69,7 @@ class BluetoothProvider extends ChangeNotifier {
   }
 
   Future<void> startScan() async {
-    if (_connectionState == ConnectionState.scanning) return;
+    if (_connectionState == BleConnectionState.scanning) return;
 
     bool permissionsGranted = await requestPermissions();
     if (!permissionsGranted) {
@@ -85,7 +85,7 @@ class BluetoothProvider extends ChangeNotifier {
       return;
     }
 
-    _connectionState = ConnectionState.scanning;
+    _connectionState = BleConnectionState.scanning;
     _statusMessage = "Scanning for devices...";
     _scanResults = [];
     notifyListeners();
@@ -125,8 +125,8 @@ class BluetoothProvider extends ChangeNotifier {
 
   Future<void> stopScan() async {
     await FlutterBluePlus.stopScan();
-    if (_connectionState == ConnectionState.scanning) {
-      _connectionState = ConnectionState.disconnected;
+    if (_connectionState == BleConnectionState.scanning) {
+      _connectionState = BleConnectionState.disconnected;
       _statusMessage = _scanResults.isEmpty
           ? "No devices found. Make sure AI-ECG Monitor is powered on."
           : "Select a device to connect";
@@ -136,7 +136,7 @@ class BluetoothProvider extends ChangeNotifier {
 
   Future<void> connectToDevice(BluetoothDevice device) async {
     try {
-      _connectionState = ConnectionState.connecting;
+      _connectionState = BleConnectionState.connecting;
       _statusMessage = "Connecting to ${device.platformName}...";
       notifyListeners();
 
@@ -177,12 +177,12 @@ class BluetoothProvider extends ChangeNotifier {
         }
       }
 
-      _connectionState = ConnectionState.connected;
+      _connectionState = BleConnectionState.connected;
       _statusMessage = "Connected to ${device.platformName}";
 
       // Listen for disconnection
       device.connectionState.listen((state) {
-        if (state == BluetoothConnectionState.disconnected) {
+        if (state == BluetoothBleConnectionState.disconnected) {
           _handleDisconnection();
         }
       });
@@ -190,7 +190,7 @@ class BluetoothProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       _statusMessage = "Connection failed: ${e.toString()}";
-      _connectionState = ConnectionState.disconnected;
+      _connectionState = BleConnectionState.disconnected;
       notifyListeners();
     }
   }
@@ -238,7 +238,7 @@ class BluetoothProvider extends ChangeNotifier {
     _paramsSubscription?.cancel();
     _alertSubscription?.cancel();
 
-    _connectionState = ConnectionState.disconnected;
+    _connectionState = BleConnectionState.disconnected;
     _connectedDevice = null;
     _statusMessage = "Disconnected";
     _ecgValue = 0;

@@ -38,18 +38,17 @@ class AIECGApp extends StatelessWidget {
         theme: ThemeData(
           useMaterial3: true,
           brightness: Brightness.dark,
-          colorScheme: ColorScheme.dark(
-            primary: const Color(0xFF00E676),
-            secondary: const Color(0xFF00BCD4),
-            surface: const Color(0xFF1A1A2E),
-            background: const Color(0xFF0F0F1A),
-            error: const Color(0xFFFF5252),
+          colorScheme: const ColorScheme.dark(
+            primary: Color(0xFF00E676),
+            secondary: Color(0xFF00BCD4),
+            surface: Color(0xFF1A1A2E),
+            error: Color(0xFFFF5252),
           ),
           scaffoldBackgroundColor: const Color(0xFF0F0F1A),
           textTheme: GoogleFonts.interTextTheme(
             ThemeData.dark().textTheme,
           ),
-          cardTheme: CardTheme(
+          cardTheme: CardThemeData(
             color: const Color(0xFF1A1A2E),
             elevation: 8,
             shape: RoundedRectangleBorder(

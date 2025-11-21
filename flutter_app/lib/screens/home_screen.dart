@@ -125,12 +125,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     IconData statusIcon;
 
     switch (btProvider.connectionState) {
-      case ConnectionState.connected:
+      case BleConnectionState.connected:
         statusColor = const Color(0xFF00E676);
         statusIcon = Icons.bluetooth_connected;
         break;
-      case ConnectionState.connecting:
-      case ConnectionState.scanning:
+      case BleConnectionState.connecting:
+      case BleConnectionState.scanning:
         statusColor = const Color(0xFFFFC107);
         statusIcon = Icons.bluetooth_searching;
         break;
@@ -161,7 +161,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     btProvider.isConnected
                         ? 'Connected'
                         : btProvider.connectionState ==
-                                ConnectionState.scanning
+                                BleConnectionState.scanning
                             ? 'Scanning...'
                             : 'Disconnected',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -414,7 +414,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _handleConnectionButton(BluetoothProvider btProvider) async {
     switch (btProvider.connectionState) {
-      case ConnectionState.disconnected:
+      case BleConnectionState.disconnected:
         await btProvider.startScan();
         if (mounted && btProvider.scanResults.isNotEmpty) {
           _showDeviceListDialog(btProvider);
@@ -422,13 +422,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           _showDeviceListDialog(btProvider);
         }
         break;
-      case ConnectionState.scanning:
+      case BleConnectionState.scanning:
         _showDeviceListDialog(btProvider);
         break;
-      case ConnectionState.connecting:
+      case BleConnectionState.connecting:
         // Do nothing while connecting
         break;
-      case ConnectionState.connected:
+      case BleConnectionState.connected:
         _showDisconnectDialog(btProvider);
         break;
     }
@@ -443,7 +443,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ),
       builder: (context) => DeviceListDialog(
         scanResults: btProvider.scanResults,
-        isScanning: btProvider.connectionState == ConnectionState.scanning,
+        isScanning: btProvider.connectionState == BleConnectionState.scanning,
         onDeviceSelected: (device) {
           Navigator.pop(context);
           btProvider.connectToDevice(device);

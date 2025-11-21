@@ -3,7 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../providers/bluetooth_provider.dart';
 
 class ConnectionButton extends StatelessWidget {
-  final ConnectionState connectionState;
+  final BleConnectionState connectionState;
   final VoidCallback onPressed;
 
   const ConnectionButton({
@@ -19,17 +19,17 @@ class ConnectionButton extends StatelessWidget {
     String label;
 
     switch (connectionState) {
-      case ConnectionState.connected:
+      case BleConnectionState.connected:
         buttonColor = const Color(0xFF00E676);
         icon = Icons.bluetooth_connected;
         label = 'Connected';
         break;
-      case ConnectionState.connecting:
+      case BleConnectionState.connecting:
         buttonColor = const Color(0xFFFFC107);
         icon = Icons.bluetooth_searching;
         label = 'Connecting...';
         break;
-      case ConnectionState.scanning:
+      case BleConnectionState.scanning:
         buttonColor = const Color(0xFF00BCD4);
         icon = Icons.bluetooth_searching;
         label = 'Scanning...';
@@ -55,8 +55,8 @@ class ConnectionButton extends StatelessWidget {
       ],
     );
 
-    if (connectionState == ConnectionState.scanning ||
-        connectionState == ConnectionState.connecting) {
+    if (connectionState == BleConnectionState.scanning ||
+        connectionState == BleConnectionState.connecting) {
       buttonContent = buttonContent
           .animate(onPlay: (controller) => controller.repeat())
           .shimmer(duration: 1500.ms, color: buttonColor.withOpacity(0.3));
