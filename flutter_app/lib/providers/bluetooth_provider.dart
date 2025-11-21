@@ -92,21 +92,14 @@ class BluetoothProvider extends ChangeNotifier {
 
     // Listen to scan results
     FlutterBluePlus.scanResults.listen((results) {
+      // Show ALL devices with names (for debugging, user can identify their device)
       _scanResults = results
-          .where((r) =>
-              r.device.platformName.isNotEmpty &&
-              (r.device.platformName.contains("ECG") ||
-                  r.device.platformName.contains("AI-ECG")))
+          .where((r) => r.device.platformName.isNotEmpty)
           .toList();
 
-      // Also include devices advertising our service UUID
-      for (var result in results) {
-        if (result.advertisementData.serviceUuids
-            .any((uuid) => uuid.toString().toLowerCase() == serviceUUID)) {
-          if (!_scanResults.contains(result)) {
-            _scanResults.add(result);
-          }
-        }
+      // Debug: print found devices
+      for (var result in _scanResults) {
+        debugPrint("Found device: ${result.device.platformName} - ${result.device.remoteId}");
       }
 
       notifyListeners();
