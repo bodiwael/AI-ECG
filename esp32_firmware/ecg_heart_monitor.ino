@@ -222,30 +222,62 @@ void detectRPeak(int sample) {
   static int lastSample = 0;
   static int peakValue = 0;
   static bool ascending = false;
+  static int adaptiveThreshold = 2048; // Start at midpoint
+  static int maxPeakSeen = 2048;
+  static int minPeakSeen = 2048;
 
   unsigned long currentTime = millis();
+
+  // Track signal range for adaptive threshold
+  if (sample > maxPeakSeen) maxPeakSeen = sample;
+  if (sample < minPeakSeen) minPeakSeen = sample;
+
+  // Update adaptive threshold (70% of peak-to-peak range above baseline)
+  int signalRange = maxPeakSeen - minPeakSeen;
+  if (signalRange > 100) {  // Only if we have meaningful signal
+    adaptiveThreshold = baselineLevel + (signalRange * 0.7);
+  }
+
+  // Slowly decay max/min to adapt to signal changes
+  if (currentTime % 1000 == 0) {
+    maxPeakSeen = (maxPeakSeen * 95) / 100;  // Decay by 5%
+    minPeakSeen = (minPeakSeen * 105) / 100;  // Decay by 5%
+    if (maxPeakSeen < baselineLevel) maxPeakSeen = baselineLevel + 100;
+    if (minPeakSeen > baselineLevel) minPeakSeen = baselineLevel - 100;
+  }
 
   // Simple peak detection
   if (sample > lastSample) {
     ascending = true;
-    peakValue = sample;
+    if (sample > peakValue) peakValue = sample;
   } else if (ascending && sample < lastSample) {
     ascending = false;
 
-    // Check if this is an R-peak
-    if (peakValue > R_PEAK_THRESHOLD) {
+    // Check if this is an R-peak using adaptive threshold
+    if (peakValue > adaptiveThreshold) {
       unsigned long rrInterval = currentTime - lastRPeakTime;
 
-      // Validate RR interval
-      if (rrInterval >= MIN_RR_INTERVAL && rrInterval <= MAX_RR_INTERVAL) {
+      // Validate RR interval (allow first peak)
+      if (lastRPeakTime == 0 || (rrInterval >= MIN_RR_INTERVAL && rrInterval <= MAX_RR_INTERVAL)) {
         // Store RR interval
-        rrIntervals[rrIndex] = rrInterval;
-        rrIndex = (rrIndex + 1) % RR_BUFFER_SIZE;
+        if (lastRPeakTime > 0) {  // Don't store first interval
+          rrIntervals[rrIndex] = rrInterval;
+          rrIndex = (rrIndex + 1) % RR_BUFFER_SIZE;
+        }
 
         lastRPeakTime = currentTime;
         rPeakDetected = true;
+
+        // Debug output
+        Serial.print("R-PEAK! Value: ");
+        Serial.print(peakValue);
+        Serial.print(" Threshold: ");
+        Serial.print(adaptiveThreshold);
+        Serial.print(" RR: ");
+        Serial.println(rrInterval);
       }
     }
+    peakValue = 0;  // Reset peak value
   }
 
   lastSample = sample;
